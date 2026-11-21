@@ -1,0 +1,31 @@
+# Cluster jetable pour l'etape 3.
+#
+#   kind create cluster --config kind-cluster.yaml
+#   kubectl config use-context kind-llm-lab
+#   kubectl apply -f ollama-k8s.yaml
+#
+# Et quand tu as fini :
+#   kind delete cluster --name llm-lab
+#
+# ATTENTION : ne deploie jamais ces charges sur un cluster partage ou de
+# production. Un modele qui depasse sa limite memoire declenche un OOM kill
+# au niveau du noeud, pas seulement du pod, et tu emportes les voisins.
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: llm-lab
+
+nodes:
+  - role: control-plane
+    # Expose le NodePort 30080 sur la machine hote, pour que bench.py
+    # puisse taper le service sans port-forward.
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 30080
+        protocol: TCP
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "workload=llm"

@@ -1,0 +1,15 @@
+# Configuration propre a la machine (chemins locaux)
+.env
+
+# Journaux du chien de garde : utiles sur le moment, pas dans le depot
+guard.log
+
+# Modeles telecharges, si jamais ils finissent dans le dossier du projet
+.models/
+models/
+
+__pycache__/
+*.pyc
+
+# En revanche, results/ est VERSIONNE volontairement : les CSV horodates
+# sont la preuve de la progression des mesures. Ne les ignore pas.

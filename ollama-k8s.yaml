@@ -1,0 +1,126 @@
+# Etape 3 : le meme modele, mais sur Kubernetes.
+#
+#   kubectl apply -f ollama-k8s.yaml
+#   kubectl -n llm-lab rollout status deploy/ollama
+#   kubectl -n llm-lab exec deploy/ollama -- ollama pull llama3.2:3b
+#   python3 bench.py --url http://localhost:30080/v1/chat/completions
+#
+# Rien d'exotique ici : Deployment, Service, probes, limites. C'est voulu.
+# L'exercice consiste a poser le pattern que tu connais deja sur une charge
+# dont le profil memoire et le temps de demarrage n'ont rien de commun avec
+# une application web.
+#
+# Les trois pieges a observer par toi-meme :
+#   1. le startupProbe genereux : le chargement du modele en RAM depasse
+#      largement le budget d'un readinessProbe classique ;
+#   2. requests memoire = limits : une charge d'inference ne doit jamais
+#      etre en classe Burstable, sinon elle se fait evincer sous pression ;
+#   3. le volume de modeles : sans persistance, chaque redemarrage retelecharge
+#      plusieurs gigaoctets.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-lab
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-models
+  namespace: llm-lab
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # 5 Gi suffisent pour deux ou trois petits modeles.
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: llm-lab
+  labels:
+    app: ollama
+spec:
+  replicas: 1
+  # Un seul pod a la fois : le PVC est ReadWriteOnce et le modele occupe
+  # toute la RAM allouee. Recreate evite un deadlock au rollout.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - name: http
+              containerPort: 11434
+          env:
+            - name: OLLAMA_NUM_PARALLEL
+              value: "1"
+            - name: OLLAMA_KEEP_ALIVE
+              value: "30m"
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+          # requests = limits : une charge d'inference ne doit jamais etre en
+          # classe Burstable, sinon elle se fait evincer sous pression memoire.
+          # 3 Gi conviennent a un modele 1B quantifie ; monte a 6 Gi pour un 7B.
+          resources:
+            requests:
+              cpu: "1"
+              memory: "3Gi"
+            limits:
+              cpu: "2"
+              memory: "3Gi"
+          # Le chargement du modele peut prendre plusieurs minutes au
+          # premier demarrage. 30 x 10 s = 5 minutes de tolerance.
+          startupProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/version
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: ollama-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: llm-lab
+spec:
+  type: NodePort
+  selector:
+    app: ollama
+  ports:
+    - name: http
+      port: 11434
+      targetPort: http
+      nodePort: 30080

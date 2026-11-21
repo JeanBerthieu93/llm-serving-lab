@@ -1,0 +1,62 @@
+# Surcouche pour machine PARTAGEE (serveur de CI/CD, VM d'equipe...).
+#
+# Docker Compose lit automatiquement ce fichier en plus de
+# docker-compose.yml : rien a changer dans les commandes. Renomme-le ou
+# supprime-le pour revenir au comportement non borne.
+#
+# Ce qu'il garantit : le conteneur d'inference ne peut pas, meme sature,
+# prendre plus que les cœurs et la memoire qui lui sont attribues.
+# Les autres services de la machine gardent le reste.
+#
+# ---------------------------------------------------------------------------
+# cpuset est regle pour une machine a 8 cœurs : les deux
+# derniers cœurs pour l'inference, les six premiers intacts pour les autres charges.
+#
+# Sur une autre machine :  nproc  puis
+#   4 cœurs  -> cpuset: "3"
+#   8 cœurs  -> cpuset: "4,5,6,7"
+#   16 cœurs -> cpuset: "12,13,14,15"
+# Garde toujours au moins la moitie des cœurs libres sur un serveur de build.
+# ---------------------------------------------------------------------------
+
+services:
+  ollama:
+    # Cœurs physiques reserves au conteneur.
+    cpuset: "4,5,6,7"
+
+    # Priorite CPU basse : en cas de contention, le noyau sert les autres
+    # processus en premier. Sur un serveur de build, c'est le reglage qui
+    # fait la difference entre "inoffensif" et "incident".
+    cpu_shares: 512
+
+    # Priorite d'ordonnancement des I/O disque, meme logique.
+    blkio_config:
+      weight: 300
+
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 1G
+
+    # Interdit le debordement sur le swap de la machine : sans cela, un
+    # depassement memoire ralentit tout le serveur au lieu d'arreter le
+    # seul conteneur. Doit rester egal a la limite memoire.
+    memswap_limit: 3G
+
+    # Stockage des modeles hors de /, qui porte le systeme et /var/lib/docker.
+    # Le chemin vient de .env (MODELS_DIR) et non de ${HOME} : sous
+    # `sudo docker compose`, ${HOME} vaudrait /root.
+    volumes:
+      - ${MODELS_DIR}:/root/.ollama
+
+    # Ecoute uniquement sur la boucle locale : le service n'est pas joignable
+    # depuis le reseau de l'entreprise. bench.py tourne en local, donc rien
+    # ne change pour toi, et tu n'exposes pas un service non prevu sur le LAN.
+    #
+    # Si ton Docker Compose est anterieur a 2.24, la balise !override n'existe
+    # pas : supprime les deux lignes ci-dessous et remplace "11434:11434" par
+    # "127.0.0.1:11434:11434" directement dans docker-compose.yml.
+    ports: !override
+      - "127.0.0.1:11434:11434"

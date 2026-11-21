@@ -1,0 +1,51 @@
+# Etape 1 : servir un modele en local, sans Kubernetes, sans GPU.
+#
+#   docker compose up -d
+#   docker compose exec ollama ollama pull llama3.2:1b
+#   curl http://localhost:11434/api/tags
+#
+# L'API est compatible OpenAI sur http://localhost:11434/v1/chat/completions
+#
+# ---------------------------------------------------------------------------
+# Choix du modele : prends le plus PETIT qui tourne chez toi.
+#
+# La taille du modele ne change pas ce que tu mesures. La file d'attente,
+# le point de saturation et la forme de la courbe de latence sont les memes
+# a toutes les echelles ; seules les valeurs absolues bougent. Un modele
+# minuscule te donne des mesures plus rapides et des iterations plus courtes.
+#
+#   smollm2:360m    ~250 Mo   -> machine tres contrainte, 2 Go de RAM
+#   qwen2.5:0.5b    ~400 Mo   -> plancher recommande
+#   llama3.2:1b     ~1,3 Go   -> defaut, bon compromis
+#   llama3.2:3b     ~2,0 Go   -> si tu as 8 Go de RAM confortables
+#
+# Les reponses d'un 360m sont mediocres. C'est sans importance ici : tu
+# mesures une infrastructure, pas une qualite de redaction. Le jour ou la
+# qualite comptera, ce sera sur GPU loue, a l'etape 3.
+# ---------------------------------------------------------------------------
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: llm-lab-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      # Requetes traitees en parallele par le serveur.
+      # Laisse 1 pour la premiere mesure : la file d'attente apparaitra
+      # nettement dans les paliers de bench.py. Passe ensuite a 4 et refais
+      # la mesure, c'est le premier arbitrage latence/debit de la serie.
+      - OLLAMA_NUM_PARALLEL=4
+      - OLLAMA_KEEP_ALIVE=30m
+    deploy:
+      resources:
+        limits:
+          # 3 Go suffisent pour un modele 1B quantifie.
+          # Monte a 6G seulement si tu passes a un 7B/8B.
+          memory: 3G
+    restart: unless-stopped
+
+volumes:
+  ollama-models:
